@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Compass Hub Prototype</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: #ffbf00; font-family: sans-serif; overflow: hidden; text-align: center; }
+        #video { width: 100%; height: 30vh; object-fit: cover; border-bottom: 2px solid #333; }
+        #guide { padding: 20px; }
+        #arrow { font-size: 150px; transition: transform 0.1s; display: inline-block; margin-top: 20px; }
+        #info { font-size: 24px; font-weight: bold; margin-top: 10px; }
+        .status { font-size: 14px; color: #666; }
+    </style>
+</head>
+<body>
+
+    <video id="video" autoplay playsinline></video>
+    
+    <div id="guide">
+        <div id="status-text" class="status">QRコードをスキャンしてください</div>
+        <div id="arrow">↑</div>
+        <div id="info">距離: ---m</div>
+        <div id="dest-label" class="status">目的地: 未設定</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const arrow = document.getElementById('arrow');
+        const info = document.getElementById('info');
+        const statusText = document.getElementById('status-text');
+
+        let currentPos = null;
+        let targetPos = { lat: 35.0116, lng: 135.7681 }; // 例：京都市役所付近
+        let deviceHeading = 0;
+	
+	// Service Workerの登録（オフライン起動のため）
+		if ('serviceWorker' in navigator) {
+		  navigator.serviceWorker.register('sw.js');
+		}
+
+        // 1. カメラ起動
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(stream => {
+            video.srcObject = stream;
+            requestAnimationFrame(tick);
+        });
+
+        // 2. QRコードの解析ループ
+        function tick() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                const canvas = document.createElement("canvas");
+                canvas.height = video.videoHeight;
+                canvas.width = video.videoWidth;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+                if (code) {
+                    // geo:lat,lng 形式を想定
+                    const match = code.data.match(/geo:(-?\d+\.\d+),(-?\d+\.\d+)/);
+                    if (match) {
+                        currentPos = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
+                        statusText.innerText = "現在地を更新しました";
+                        updateNavigation();
+                    }
+                }
+            }
+            requestAnimationFrame(tick);
+        }
+
+        // 3. コンパス（端末の向き）取得
+        window.addEventListener('deviceorientationabsolute', e => {
+            deviceHeading = e.alpha || 0; // 北を基準とした回転角
+            updateNavigation();
+        }, true);
+
+        // 4. 方位と距離の計算
+        function updateNavigation() {
+            if (!currentPos) return;
+
+            // 目的地までの方位角を計算
+            const bearing = calculateBearing(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
+            const distance = calculateDistance(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
+
+            // 矢印の回転 (目的地方位 - 端末の向き)
+            const rotation = bearing + deviceHeading;
+            arrow.style.transform = `rotate(${-rotation}deg)`;
+            info.innerText = `距離: ${Math.round(distance)}m`;
+            
+            // 目的地に近づいたら振動（対応端末のみ）
+            if (Math.abs(bearing + deviceHeading) < 10) {
+                if (navigator.vibrate) navigator.vibrate(50);
+            }
+        }
+
+        function calculateBearing(lat1, lng1, lat2, lng2) {
+            const rad = Math.PI / 180;
+            const y = Math.sin((lng2 - lng1) * rad) * Math.cos(lat2 * rad);
+            const x = Math.cos(lat1 * rad) * Math.sin(lat2 * rad) - Math.sin(lat1 * rad) * Math.cos(lat2 * rad) * Math.cos((lng2 - lng1) * rad);
+            return Math.atan2(y, x) * 180 / Math.PI;
+        }
+
+        function calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371e3; // 地球の半径(m)
+            const rad = Math.PI / 180;
+            const dLat = (lat2 - lat1) * rad;
+            const dLng = (lng2 - lng1) * rad;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1*rad) * Math.cos(lat2*rad) * Math.sin(dLng/2) * Math.sin(dLng/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+    </script>
+</body>
+</html>
