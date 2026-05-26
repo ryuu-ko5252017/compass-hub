@@ -34,6 +34,11 @@
         let currentPos = null;
         let targetPos = { lat: 35.0116, lng: 135.7681 }; // 例：京都市役所付近
         let deviceHeading = 0;
+
+	// --- ここから追加 ---
+	let smoothedHeading = 0;
+	const alpha = 0.15; // 数値を小さくするほど「重く（滑らか）」なります
+	// --- ここまで ---
 	
 	// Service Workerの登録（オフライン起動のため）
 		if ('serviceWorker' in navigator) {
@@ -71,10 +76,26 @@
         }
 
         // 3. コンパス（端末の向き）取得
-        window.addEventListener('deviceorientationabsolute', e => {
-            deviceHeading = e.alpha || 0; // 北を基準とした回転角
-            updateNavigation();
-        }, true);
+
+       		 // センサーの値を滑らかにして反映する
+		window.addEventListener('deviceorientationabsolute', e => {
+    		const rawHeading = e.alpha || 0;
+
+    		// 前回の値と今回の値を混ぜる（ローパスフィルタ）
+   		 // 急激な針の振れを抑え、ゆっくり目的地を指すようになります
+    		let diff = rawHeading - smoothedHeading;
+    
+    		// 360度をまたぐ時の計算（0度と359度の境界で針が暴れないようにする処理）
+    		if (diff > 180) diff -= 360;
+    		if (diff < -180) diff += 360;
+    
+    		smoothedHeading += alpha * diff;
+    
+    		// 計算結果をナビに反映
+    		deviceHeading = (smoothedHeading + 360) % 360; 
+    		updateNavigation();
+		}, true);
+
 
         // 4. 方位と距離の計算
         function updateNavigation() {
