@@ -77,26 +77,31 @@
 
         // 3. コンパス（端末の向き）取得
 
-       		 // センサーの値を滑らかにして反映する
-		window.addEventListener('deviceorientationabsolute', e => {
-    		const rawHeading = e.alpha || 0;
+		window.addEventListener('deviceorientation', e => {
+    let rawHeading = 0;
 
-    		// 前回の値と今回の値を混ぜる（ローパスフィルタ）
-   		 // 急激な針の振れを抑え、ゆっくり目的地を指すようになります
-    		let diff = rawHeading - smoothedHeading;
-    
-    		// 360度をまたぐ時の計算（0度と359度の境界で針が暴れないようにする処理）
-    		if (diff > 180) diff -= 360;
-    		if (diff < -180) diff += 360;
-    
-    		smoothedHeading += alpha * diff;
-    
-    		// 計算結果をナビに反映
-    		deviceHeading = (smoothedHeading + 360) % 360; 
-    		updateNavigation();
-		}, true);
+    // iPhone (iOS) の場合
+    if (e.webkitCompassHeading !== undefined) {
+        rawHeading = e.webkitCompassHeading; // iOS専用の絶対方位
+    } 
+    // Android (Chrome) などの場合
+    else if (e.absolute === true || e.alpha !== null) {
+        // alphaは反時計回りなので、時計回りに変換して補正
+        rawHeading = 360 - e.alpha; 
+    }
 
+    // --- ここから下は「滑らかにする計算（昨日追加分）」 ---
+    let diff = rawHeading - smoothedHeading;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    
+    smoothedHeading += alpha * diff;
+    deviceHeading = (smoothedHeading + 360) % 360;
+    
+    updateNavigation();
+}, true);
 
+    
         // 4. 方位と距離の計算
         function updateNavigation() {
             if (!currentPos) return;
