@@ -3,26 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Compass Hub Prototype</title>
+    <title>Compass Hub - Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
-        body { margin: 0; background: #000; color: #ffbf00; font-family: sans-serif; overflow: hidden; text-align: center; }
-        #video { width: 100%; height: 30vh; object-fit: cover; border-bottom: 2px solid #333; }
-        #guide { padding: 20px; }
-        #arrow { font-size: 150px; transition: transform 0.1s; display: inline-block; margin-top: 20px; }
-        #info { font-size: 24px; font-weight: bold; margin-top: 10px; }
-        .status { font-size: 24px; color: #666; }
+        body { margin: 0; background: #000; color: #ffbf00; font-family: sans-serif; overflow: hidden; text-align: center; display: flex; flex-direction: column; height: 100vh; }
+        #video { width: 100%; height: 30vh; object-fit: cover; border-bottom: 2px solid #333; background: #111; display: none; }
+        #display-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
+        #arrow { font-size: 150px; transition: transform 0.1s; display: inline-block; }
+        #info { font-size: 20px; font-weight: bold; margin-top: 10px; }
+        .status { font-size: 16px; color: #aaa; margin: 5px; }
+        
+        /* ボタンエリア */
+        #controls { background: #222; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 2px solid #333; }
+        button { background: #444; color: #ffbf00; border: 1px solid #ffbf00; padding: 12px; font-size: 14px; border-radius: 5px; cursor: pointer; }
+        button:active { background: #ffbf00; color: #000; }
+        .full-width { grid-column: span 2; background: #552222; }
+
+        /* セレクトボックス */
+        select { background: #333; color: #fff; padding: 10px; width: 100%; border-radius: 5px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
 
     <video id="video" autoplay playsinline></video>
     
-    <div id="guide">
-        <div id="status-text" class="status">QRコードをスキャンしてください</div>
+    <div id="display-area">
+        <div id="status-text" class="status">目的地と現在地を設定してください</div>
         <div id="arrow">↑</div>
         <div id="info">距離: ---m</div>
-        <div id="dest-label" class="status">目的地: 未設定</div>
+        <div id="loc-info" class="status">
+            自: 未設定<br>
+            至: 未設定
+        </div>
+    </div>
+
+    <div id="controls">
+        <select id="point-selector">
+            <option value="">-- 地点データを選択 --</option>
+            <option value="35.0116,135.7681">京都市役所</option>
+            <option value="35.0312,135.8744">滋賀里駅周辺</option>
+            <option value="35.0035,135.8648">大津市役所</option>
+        </select>
+        <button onclick="setFromList('target')">目的地に設定</button>
+        <button onclick="setFromList('current')">現在地に設定</button>
+        <button class="full-width" onclick="startScan()">QRスキャン起動 (現在地更新)</button>
     </div>
 
     <script>
@@ -30,29 +54,60 @@
         const arrow = document.getElementById('arrow');
         const info = document.getElementById('info');
         const statusText = document.getElementById('status-text');
+        const locInfo = document.getElementById('loc-info');
+        const pointSelector = document.getElementById('point-selector');
 
         let currentPos = null;
-        let targetPos = { lat: 35.0116, lng: 135.7681 }; // 例：京都市役所付近
+        let targetPos = null;
         let deviceHeading = 0;
+        let smoothedHeading = 0;
+        const alpha = 0.15;
+        let scanActive = false;
+        let videoStream = null;
 
-	// --- ここから追加 ---
-	let smoothedHeading = 0;
-	const alpha = 0.15; // 数値を小さくするほど「重く（滑らか）」なります
-	// --- ここまで ---
-	
-	// Service Workerの登録（オフライン起動のため）
-		if ('serviceWorker' in navigator) {
-		  navigator.serviceWorker.register('sw.js');
-		}
+        // --- 1. カメラ操作 ---
+        async function startScan() {
+            if (scanActive) return;
+            statusText.innerText = "QRスキャン中...";
+            video.style.display = "block";
+            scanActive = true;
+            
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = videoStream;
+                requestAnimationFrame(tick);
+            } catch (err) {
+                alert("カメラの起動に失敗しました");
+            }
+        }
 
-        // 1. カメラ起動
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(stream => {
-            video.srcObject = stream;
-            requestAnimationFrame(tick);
-        });
+        function stopScan() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+            }
+            video.style.display = "none";
+            scanActive = false;
+        }
 
-        // 2. QRコードの解析ループ
+        // --- 2. 地点設定 ---
+        function setFromList(type) {
+            const val = pointSelector.value;
+            if (!val) return;
+            const [lat, lng] = val.split(',').map(Number);
+            const pos = { lat, lng };
+            
+            if (type === 'target') {
+                targetPos = pos;
+            } else {
+                currentPos = pos;
+                stopScan(); // 選択されたらカメラ停止
+            }
+            updateNavigation();
+        }
+
+        // --- 3. QR解析ループ ---
         function tick() {
+            if (!scanActive) return;
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 const canvas = document.createElement("canvas");
                 canvas.height = video.videoHeight;
@@ -63,62 +118,52 @@
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
 
                 if (code) {
-                    // geo:lat,lng 形式を想定
                     const match = code.data.match(/geo:(-?\d+\.\d+),(-?\d+\.\d+)/);
                     if (match) {
                         currentPos = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
-                        statusText.innerText = "現在地を更新しました";
+                        statusText.innerText = "現在地をスキャンで更新しました";
+                        stopScan(); // スキャン成功でカメラ停止（省電力）
                         updateNavigation();
                     }
                 }
             }
-            requestAnimationFrame(tick);
+            if (scanActive) requestAnimationFrame(tick);
         }
 
-// --- 3. コンパス（端末の向き）取得 ---
+        // --- 4. コンパス処理 (Android Absolute) ---
+        const orientationEvent = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+        window.addEventListener(orientationEvent, e => {
+            let rawHeading = 0;
+            if (e.webkitCompassHeading !== undefined) {
+                rawHeading = e.webkitCompassHeading;
+            } else if (e.alpha !== null) {
+                rawHeading = (360 - e.alpha);
+            }
 
-// Android/Chrome向けに 'deviceorientationabsolute' を優先的に使用
-const orientationEvent = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+            let diff = rawHeading - smoothedHeading;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            smoothedHeading += alpha * diff;
+            deviceHeading = (smoothedHeading + 360) % 360;
+            
+            if (currentPos && targetPos) updateNavigation();
+        }, true);
 
-window.addEventListener(orientationEvent, e => {
-    let rawHeading = 0;
+        // --- 5. 誘導ロジック ---
+        function updateNavigation() {
+            if (!currentPos || !targetPos) {
+                locInfo.innerHTML = `自: ${currentPos ? '設定済' : '未設定'}<br>至: ${targetPos ? '設定済' : '未設定'}`;
+                return;
+            }
 
-    if (e.webkitCompassHeading !== undefined) {
-        // iOS
-        rawHeading = e.webkitCompassHeading;
-    } else if (e.alpha !== null) {
-        // Android: alphaは反時計回り(0~360)
-        // 多くのAndroid端末では、360 - e.alpha で「磁北からの時計回り」になる
-        rawHeading = (360 - e.alpha);
-    }
+            const bearing = calculateBearing(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
+            const distance = calculateDistance(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
 
-    // 滑らかにする計算（ここは現在のロジックでOK）
-    let diff = rawHeading - smoothedHeading;
-    if (diff > 180) diff -= 360;
-    if (diff < -180) diff += 360;
-    
-    smoothedHeading += alpha * diff;
-    deviceHeading = (smoothedHeading + 360) % 360;
-    
-    updateNavigation();
-}, true);
-
-// --- 4. 方位と距離の計算 ---
-function updateNavigation() {
-    // ... (前段の処理は同じ) ...
-
-    const bearing = calculateBearing(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
-    const distance = calculateDistance(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
-
-    // 修正ポイント：相対角度の算出
-    // 「目的地の方向」から「自分の向き」を引く
-    let relativeAngle = bearing - deviceHeading;
-
-    // 矢印を回転させる（CSSのrotateは時計回りが正）
-    arrow.style.transform = `rotate(${relativeAngle}deg)`;
-    
-    info.innerText = `距離: ${Math.round(distance)}m`;
-}
+            let relativeAngle = bearing - deviceHeading;
+            arrow.style.transform = `rotate(${relativeAngle}deg)`;
+            info.innerText = `距離: ${Math.round(distance)}m`;
+            locInfo.innerHTML = `自: ${currentPos.lat.toFixed(4)}, ${currentPos.lng.toFixed(4)}<br>至: ${targetPos.lat.toFixed(4)}, ${targetPos.lng.toFixed(4)}`;
+        }
 
         function calculateBearing(lat1, lng1, lat2, lng2) {
             const rad = Math.PI / 180;
@@ -128,13 +173,15 @@ function updateNavigation() {
         }
 
         function calculateDistance(lat1, lng1, lat2, lng2) {
-            const R = 6371e3; // 地球の半径(m)
+            const R = 6371e3;
             const rad = Math.PI / 180;
             const dLat = (lat2 - lat1) * rad;
             const dLng = (lng2 - lng1) * rad;
             const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1*rad) * Math.cos(lat2*rad) * Math.sin(dLng/2) * Math.sin(dLng/2);
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
+
+        // 初期状態でスキャンはオフ、地点情報を待機
     </script>
 </body>
 </html>
