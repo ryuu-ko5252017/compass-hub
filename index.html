@@ -38,14 +38,13 @@
     </div>
 
     <div id="controls">
-<select id="point-selector">
-    <option value="">-- 地点データを選択 --</option>
-    <option value="35.0116,135.7681">京都市役所</option>
-    <option value="35.0312,135.8744">滋賀里駅周辺</option>
-    <option value="35.0035,135.8648">大津市役所</option>
-    <option value="35.0191,135.8496">大津赤十字病院</option> </select>
-
-               <button onclick="setFromList('target')">目的地に設定</button>
+        <select id="point-selector">
+            <option value="">-- 地点データを選択 --</option>
+            <option value="35.0116,135.7681">京都市役所</option>
+            <option value="35.0312,135.8744">滋賀里駅周辺</option>
+            <option value="35.0035,135.8648">大津市役所</option>
+        </select>
+        <button onclick="setFromList('target')">目的地に設定</button>
         <button onclick="setFromList('current')">現在地に設定</button>
         <button class="full-width" onclick="startScan()">QRスキャン起動 (現在地更新)</button>
     </div>
@@ -67,45 +66,20 @@
         let videoStream = null;
 
         // --- 1. カメラ操作 ---
-       
- async function startScan() {
-    if (scanActive) return;
-    
-    // UIをスキャンモードに変更
-    statusText.innerText = "カメラを起動中...";
-    video.style.display = "block";
-    
-    try {
-        // 以前のストリームが残っていれば停止
-        if (videoStream) {
-            videoStream.getTracks().forEach(track => track.stop());
-        }
-
-        const constraints = { 
-            video: { 
-                facingMode: "environment",
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            } 
-        };
-        
-        videoStream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = videoStream;
-        
-        // メタデータがロードされたらループ開始
-        video.onloadedmetadata = () => {
-            video.play();
+        async function startScan() {
+            if (scanActive) return;
+            statusText.innerText = "QRスキャン中...";
+            video.style.display = "block";
             scanActive = true;
-            statusText.innerText = "QRコードをスキャンしてください";
-            requestAnimationFrame(tick);
-        };
-    } catch (err) {
-        console.error("Camera Error:", err);
-        statusText.innerText = "カメラ起動失敗: " + err.name;
-        video.style.display = "none";
-        alert("カメラへのアクセスを許可してください。");
-    }
-}
+            
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = videoStream;
+                requestAnimationFrame(tick);
+            } catch (err) {
+                alert("カメラの起動に失敗しました");
+            }
+        }
 
         function stopScan() {
             if (videoStream) {
