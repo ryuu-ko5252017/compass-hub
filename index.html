@@ -66,20 +66,45 @@
         let videoStream = null;
 
         // --- 1. カメラ操作 ---
-        async function startScan() {
-            if (scanActive) return;
-            statusText.innerText = "QRスキャン中...";
-            video.style.display = "block";
-            scanActive = true;
-            
-            try {
-                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                video.srcObject = videoStream;
-                requestAnimationFrame(tick);
-            } catch (err) {
-                alert("カメラの起動に失敗しました");
-            }
+       
+ async function startScan() {
+    if (scanActive) return;
+    
+    // UIをスキャンモードに変更
+    statusText.innerText = "カメラを起動中...";
+    video.style.display = "block";
+    
+    try {
+        // 以前のストリームが残っていれば停止
+        if (videoStream) {
+            videoStream.getTracks().forEach(track => track.stop());
         }
+
+        const constraints = { 
+            video: { 
+                facingMode: "environment",
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            } 
+        };
+        
+        videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = videoStream;
+        
+        // メタデータがロードされたらループ開始
+        video.onloadedmetadata = () => {
+            video.play();
+            scanActive = true;
+            statusText.innerText = "QRコードをスキャンしてください";
+            requestAnimationFrame(tick);
+        };
+    } catch (err) {
+        console.error("Camera Error:", err);
+        statusText.innerText = "カメラ起動失敗: " + err.name;
+        video.style.display = "none";
+        alert("カメラへのアクセスを許可してください。");
+    }
+}
 
         function stopScan() {
             if (videoStream) {
