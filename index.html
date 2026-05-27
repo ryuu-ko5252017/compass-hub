@@ -7,46 +7,45 @@
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: #ffbf00; font-family: sans-serif; overflow: hidden; text-align: center; display: flex; flex-direction: column; height: 100vh; }
-        #video { width: 100%; height: 30vh; object-fit: cover; border-bottom: 2px solid #333; background: #111; display: none; }
-        #display-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
+        #video { width: 100%; height: 40vh; object-fit: cover; border-bottom: 2px solid #333; background: #111; display: none; }
+        #display-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 10px; }
         #arrow { font-size: 150px; transition: transform 0.1s; display: inline-block; }
         #info { font-size: 20px; font-weight: bold; margin-top: 10px; }
-        .status { font-size: 16px; color: #aaa; margin: 5px; }
+        .status { font-size: 14px; color: #aaa; margin: 2px; }
         
-        /* ボタンエリア */
-        #controls { background: #222; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-top: 2px solid #333; }
-        button { background: #444; color: #ffbf00; border: 1px solid #ffbf00; padding: 12px; font-size: 14px; border-radius: 5px; cursor: pointer; }
+        #controls { background: #222; padding: 15px; display: flex; flex-direction: column; gap: 10px; border-top: 2px solid #333; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        button { background: #444; color: #ffbf00; border: 1px solid #ffbf00; padding: 15px; font-size: 14px; border-radius: 5px; font-weight: bold; }
         button:active { background: #ffbf00; color: #000; }
-        .full-width { grid-column: span 2; background: #552222; }
-
-        /* セレクトボックス */
-        select { background: #333; color: #fff; padding: 10px; width: 100%; border-radius: 5px; margin-bottom: 10px; }
+        select { background: #333; color: #fff; padding: 15px; width: 100%; border-radius: 5px; font-size: 16px; border: 1px solid #666; }
     </style>
 </head>
 <body>
 
-    <video id="video" autoplay playsinline></video>
+    <video id="video" autoplay playsinline muted></video>
     
     <div id="display-area">
-        <div id="status-text" class="status">目的地と現在地を設定してください</div>
+        <div id="status-text" class="status">地点を選択してください</div>
         <div id="arrow">↑</div>
         <div id="info">距離: ---m</div>
-        <div id="loc-info" class="status">
-            自: 未設定<br>
-            至: 未設定
-        </div>
+        <div id="loc-info" class="status">自: 未設定 / 至: 未設定</div>
     </div>
 
     <div id="controls">
-        <select id="point-selector">
-            <option value="">-- 地点データを選択 --</option>
-            <option value="35.0116,135.7681">京都市役所</option>
-            <option value="35.0312,135.8744">滋賀里駅周辺</option>
-            <option value="35.0035,135.8648">大津市役所</option>
+        <select id="point-selector" onchange="handleSelectionChange()">
+            <option value="">-- 地点を選択 --</option>
+            <option value="SCAN">📷 QRコードをスキャン</option>
+            <optgroup label="登録地点">
+                <option value="35.0116,135.7681">京都市役所</option>
+                <option value="35.0312,135.8744">滋賀里駅周辺</option>
+                <option value="35.0035,135.8648">大津市役所</option>
+            </optgroup>
         </select>
-        <button onclick="setFromList('target')">目的地に設定</button>
-        <button onclick="setFromList('current')">現在地に設定</button>
-        <button class="full-width" onclick="startScan()">QRスキャン起動 (現在地更新)</button>
+
+        <div class="btn-group">
+            <button onclick="applyLocation('target')">目的地に設定</button>
+            <button onclick="applyLocation('current')">現在地に設定</button>
+        </div>
     </div>
 
     <script>
@@ -65,47 +64,68 @@
         let scanActive = false;
         let videoStream = null;
 
-        // --- 1. カメラ操作 ---
+        // --- 1. セレクター操作 ---
+        function handleSelectionChange() {
+            if (pointSelector.value === "SCAN") {
+                startScan();
+            } else {
+                stopScan();
+            }
+        }
+
+        // --- 2. カメラ操作（修正版） ---
         async function startScan() {
             if (scanActive) return;
-            statusText.innerText = "QRスキャン中...";
-            video.style.display = "block";
-            scanActive = true;
+            statusText.innerText = "カメラ起動をリクエスト中...";
             
+            const constraints = { 
+                video: { facingMode: "environment" },
+                audio: false 
+            };
+
             try {
-                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                videoStream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = videoStream;
+                video.style.display = "block";
+                
+                // 明示的にPlayを呼ぶ
+                await video.play();
+                
+                scanActive = true;
+                statusText.innerText = "QRコードをスキャンしてください";
                 requestAnimationFrame(tick);
             } catch (err) {
-                alert("カメラの起動に失敗しました");
+                console.error(err);
+                statusText.innerText = "エラー: " + err.message;
+                alert("カメラを起動できませんでした。ブラウザの設定で許可されているか確認してください。");
+                pointSelector.value = "";
             }
         }
 
         function stopScan() {
+            scanActive = false;
             if (videoStream) {
                 videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
             }
             video.style.display = "none";
-            scanActive = false;
         }
 
-        // --- 2. 地点設定 ---
-        function setFromList(type) {
+        // --- 3. 設定適用 ---
+        function applyLocation(type) {
             const val = pointSelector.value;
-            if (!val) return;
-            const [lat, lng] = val.split(',').map(Number);
-            const pos = { lat, lng };
-            
-            if (type === 'target') {
-                targetPos = pos;
-            } else {
-                currentPos = pos;
-                stopScan(); // 選択されたらカメラ停止
+            if (!val || val === "SCAN") {
+                alert("地点を選択してください");
+                return;
             }
+            const [lat, lng] = val.split(',').map(Number);
+            if (type === 'target') targetPos = { lat, lng };
+            else currentPos = { lat, lng };
+            
             updateNavigation();
         }
 
-        // --- 3. QR解析ループ ---
+        // --- 4. QR解析ループ ---
         function tick() {
             if (!scanActive) return;
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
@@ -121,8 +141,9 @@
                     const match = code.data.match(/geo:(-?\d+\.\d+),(-?\d+\.\d+)/);
                     if (match) {
                         currentPos = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
-                        statusText.innerText = "現在地をスキャンで更新しました";
-                        stopScan(); // スキャン成功でカメラ停止（省電力）
+                        statusText.innerText = "現在地を更新しました";
+                        pointSelector.value = ""; // スキャン完了で戻す
+                        stopScan();
                         updateNavigation();
                     }
                 }
@@ -130,7 +151,7 @@
             if (scanActive) requestAnimationFrame(tick);
         }
 
-        // --- 4. コンパス処理 (Android Absolute) ---
+        // --- 5. コンパス・方位計算（以前と同様） ---
         const orientationEvent = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
         window.addEventListener(orientationEvent, e => {
             let rawHeading = 0;
@@ -139,30 +160,25 @@
             } else if (e.alpha !== null) {
                 rawHeading = (360 - e.alpha);
             }
-
             let diff = rawHeading - smoothedHeading;
             if (diff > 180) diff -= 360;
             if (diff < -180) diff += 360;
             smoothedHeading += alpha * diff;
             deviceHeading = (smoothedHeading + 360) % 360;
-            
-            if (currentPos && targetPos) updateNavigation();
+            updateNavigation();
         }, true);
 
-        // --- 5. 誘導ロジック ---
         function updateNavigation() {
             if (!currentPos || !targetPos) {
-                locInfo.innerHTML = `自: ${currentPos ? '設定済' : '未設定'}<br>至: ${targetPos ? '設定済' : '未設定'}`;
+                locInfo.innerText = `自: ${currentPos?'OK':'未'} / 至: ${targetPos?'OK':'未'}`;
                 return;
             }
-
             const bearing = calculateBearing(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
             const distance = calculateDistance(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
-
             let relativeAngle = bearing - deviceHeading;
             arrow.style.transform = `rotate(${relativeAngle}deg)`;
             info.innerText = `距離: ${Math.round(distance)}m`;
-            locInfo.innerHTML = `自: ${currentPos.lat.toFixed(4)}, ${currentPos.lng.toFixed(4)}<br>至: ${targetPos.lat.toFixed(4)}, ${targetPos.lng.toFixed(4)}`;
+            locInfo.innerText = `自: ${currentPos.lat.toFixed(3)} / 至: ${targetPos.lat.toFixed(3)}`;
         }
 
         function calculateBearing(lat1, lng1, lat2, lng2) {
@@ -180,8 +196,6 @@
             const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1*rad) * Math.cos(lat2*rad) * Math.sin(dLng/2) * Math.sin(dLng/2);
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
-
-        // 初期状態でスキャンはオフ、地点情報を待機
     </script>
 </body>
 </html>
