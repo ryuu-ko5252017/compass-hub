@@ -3,26 +3,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Compass Hub Prototype</title>
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <title>オフラインQRコードコンパス</title>
+    <link rel="manifest" href="./manifest.json">    
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
-        body { margin: 0; background: #000; color: #ffbf00; font-family: sans-serif; overflow: hidden; text-align: center; }
-        #video { width: 100%; height: 30vh; object-fit: cover; border-bottom: 2px solid #333; }
-        #guide { padding: 20px; }
-        #arrow { font-size: 150px; transition: transform 0.1s; display: inline-block; margin-top: 20px; }
-        #info { font-size: 24px; font-weight: bold; margin-top: 10px; }
-        .status { font-size: 14px; color: #666; }
+        body { margin: 0; background: #000; color: #ffbf00; font-family: sans-serif; overflow: hidden; text-align: center; display: flex; flex-direction: column; height: 100vh; }
+        
+        /* 操作パネルを上部に固定 */
+        #controls { background: #222; padding: 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 2px solid #333; z-index: 10; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        button { background: #444; color: #ffbf00; border: 1px solid #ffbf00; padding: 12px; font-size: 14px; border-radius: 5px; font-weight: bold; }
+        button:active { background: #ffbf00; color: #000; }
+        select { background: #333; color: #fff; padding: 12px; width: 100%; border-radius: 5px; font-size: 16px; border: 1px solid #666; -webkit-appearance: none; }
+
+        /* カメラプレビュー */
+        #video { width: 100%; height: 35vh; object-fit: cover; background: #111; display: none; }
+        
+        /* 誘導表示エリア（残りのスペースを全部使う） */
+        #display-area { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 10px; position: relative; }
+        #arrow { font-size: 150px; transition: transform 0.1s; display: inline-block; line-height: 1; }
+        #info { font-size: 22px; font-weight: bold; margin-top: 10px; }
+        .status { font-size: 14px; color: #aaa; margin: 2px; }
+        #loc-info { font-family: monospace; }
     </style>
 </head>
 <body>
 
-    <video id="video" autoplay playsinline></video>
+    <div id="controls">
+        <select id="point-selector" onchange="handleSelectionChange()">
+            <option value="">-- 地点を選択 --</option>
+            <option value="SCAN">📷 QRコードをスキャン</option>
+            <optgroup label="登録地点">
+                <option value="35.0116,135.7681">京都市役所</option>
+                <option value="35.0312,135.8744">滋賀里駅周辺</option>
+                <option value="35.0035,135.8648">大津市役所</option>
+            </optgroup>
+        </select>
+
+        <div class="btn-group">
+            <button onclick="applyLocation('current')">現在地に設定</button>
+            <button onclick="applyLocation('target')">目的地に設定</button>
+        </div>
+    </div>
+
+    <video id="video" autoplay playsinline muted></video>
     
-    <div id="guide">
-        <div id="status-text" class="status">QRコードをスキャンしてください</div>
+    <div id="display-area">
+        <div id="status-text" class="status">地点を設定してください</div>
         <div id="arrow">↑</div>
         <div id="info">距離: ---m</div>
-        <div id="dest-label" class="status">目的地: 未設定</div>
+        <div id="loc-info" class="status">自: 未 / 至: 未</div>
     </div>
 
     <script>
@@ -30,24 +60,56 @@
         const arrow = document.getElementById('arrow');
         const info = document.getElementById('info');
         const statusText = document.getElementById('status-text');
+        const locInfo = document.getElementById('loc-info');
+        const pointSelector = document.getElementById('point-selector');
 
         let currentPos = null;
-        let targetPos = { lat: 35.0116, lng: 135.7681 }; // 例：京都市役所付近
+        let targetPos = null;
         let deviceHeading = 0;
-	
-	// Service Workerの登録（オフライン起動のため）
-		if ('serviceWorker' in navigator) {
-		  navigator.serviceWorker.register('sw.js');
-		}
+        let smoothedHeading = 0;
+        const alpha = 0.15;
+        let scanActive = false;
+        let videoStream = null;
 
-        // 1. カメラ起動
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(stream => {
-            video.srcObject = stream;
-            requestAnimationFrame(tick);
-        });
+        function handleSelectionChange() {
+            if (pointSelector.value === "SCAN") startScan();
+            else stopScan();
+        }
 
-        // 2. QRコードの解析ループ
+        async function startScan() {
+            if (scanActive) return;
+            statusText.innerText = "カメラ起動中...";
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+                video.srcObject = videoStream;
+                video.style.display = "block";
+                await video.play();
+                scanActive = true;
+                statusText.innerText = "QRスキャン：カメラの下の文字を確認";
+                requestAnimationFrame(tick);
+            } catch (err) {
+                statusText.innerText = "カメラエラー";
+                alert("カメラを起動できません");
+            }
+        }
+
+        function stopScan() {
+            scanActive = false;
+            if (videoStream) { videoStream.getTracks().forEach(track => track.stop()); videoStream = null; }
+            video.style.display = "none";
+        }
+
+        function applyLocation(type) {
+            const val = pointSelector.value;
+            if (!val || val === "SCAN") { alert("地点を選択してください"); return; }
+            const [lat, lng] = val.split(',').map(Number);
+            if (type === 'target') targetPos = { lat, lng };
+            else currentPos = { lat, lng };
+            updateNavigation();
+        }
+
         function tick() {
+            if (!scanActive) return;
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 const canvas = document.createElement("canvas");
                 canvas.height = video.videoHeight;
@@ -58,41 +120,43 @@
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
 
                 if (code) {
-                    // geo:lat,lng 形式を想定
                     const match = code.data.match(/geo:(-?\d+\.\d+),(-?\d+\.\d+)/);
                     if (match) {
                         currentPos = { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
                         statusText.innerText = "現在地を更新しました";
+                        pointSelector.value = ""; 
+                        stopScan();
                         updateNavigation();
                     }
                 }
             }
-            requestAnimationFrame(tick);
+            if (scanActive) requestAnimationFrame(tick);
         }
 
-        // 3. コンパス（端末の向き）取得
-        window.addEventListener('deviceorientationabsolute', e => {
-            deviceHeading = e.alpha || 0; // 北を基準とした回転角
+        const orientationEvent = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+        window.addEventListener(orientationEvent, e => {
+            let rawHeading = 0;
+            if (e.webkitCompassHeading !== undefined) rawHeading = e.webkitCompassHeading;
+            else if (e.alpha !== null) rawHeading = (360 - e.alpha);
+            let diff = rawHeading - smoothedHeading;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            smoothedHeading += alpha * diff;
+            deviceHeading = (smoothedHeading + 360) % 360;
             updateNavigation();
         }, true);
 
-        // 4. 方位と距離の計算
         function updateNavigation() {
-            if (!currentPos) return;
-
-            // 目的地までの方位角を計算
+            if (!currentPos || !targetPos) {
+                locInfo.innerText = `自: ${currentPos?'OK':'未'} / 至: ${targetPos?'OK':'未'}`;
+                return;
+            }
             const bearing = calculateBearing(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
             const distance = calculateDistance(currentPos.lat, currentPos.lng, targetPos.lat, targetPos.lng);
-
-            // 矢印の回転 (目的地方位 - 端末の向き)
-            const rotation = bearing + deviceHeading;
-            arrow.style.transform = `rotate(${-rotation}deg)`;
+            let relativeAngle = bearing - deviceHeading;
+            arrow.style.transform = `rotate(${relativeAngle}deg)`;
             info.innerText = `距離: ${Math.round(distance)}m`;
-            
-            // 目的地に近づいたら振動（対応端末のみ）
-            if (Math.abs(bearing + deviceHeading) < 10) {
-                if (navigator.vibrate) navigator.vibrate(50);
-            }
+            locInfo.innerText = `自:${currentPos.lat.toFixed(3)},${currentPos.lng.toFixed(3)} / 至:${targetPos.lat.toFixed(3)},${targetPos.lng.toFixed(3)}`;
         }
 
         function calculateBearing(lat1, lng1, lat2, lng2) {
@@ -103,7 +167,7 @@
         }
 
         function calculateDistance(lat1, lng1, lat2, lng2) {
-            const R = 6371e3; // 地球の半径(m)
+            const R = 6371e3;
             const rad = Math.PI / 180;
             const dLat = (lat2 - lat1) * rad;
             const dLng = (lng2 - lng1) * rad;
@@ -111,5 +175,15 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
     </script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('Service Worker 登録成功！', reg))
+        .catch(err => console.log('登録失敗...', err));
+    });
+  }
+</script>
 </body>
 </html>
