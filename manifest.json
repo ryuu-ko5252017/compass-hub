@@ -1,6 +1,6 @@
 {
-  "short_name": "マイアプリ",
-  "name": "マイオフラインアプリケーション",
+  "short_name": "ミチビキ",
+  "name": "オフラインQRコードコンパス",
   "icons": [
     {
       "src": "icon-192.png",
