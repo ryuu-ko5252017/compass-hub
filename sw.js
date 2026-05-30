@@ -1,35 +1,38 @@
 // sw.js
-const CACHE_NAME = 'v2'; // 更新を認識させるためにv2に上げると良いです
+
+// バージョン管理：更新時はここを v3, v4 と上げていく
+const CACHE_NAME = 'michibiki-v2'; 
+
 const ASSETS = [
   './',
   'index.html',
-  'manifest.json', // マニフェスト自体もキャッシュすると安定します
-  'icon-192.png',  // ← カンマを追加
-  'icon-512.png'   // ← カンマを追加
+  'manifest.json',
+  'icon-192.png',
+  'icon-512.png'
 ];
 
-// インストール時にキャッシュ
+// インストール：キャッシュを保存し、即座に有効化
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      // 一つでも失敗すると登録されないため、慎重に実行
+      console.log('Caching assets...');
       return cache.addAll(ASSETS);
-    }).then(() => self.skipWaiting())
+    }).then(() => self.skipWaiting()) // 新しいSWを待機させず即座に反映
   );
 });
 
-// アクティベート時に古いキャッシュを削除（これがあると更新がスムーズです）
+// アクティベート：古いバージョンのキャッシュを自動削除
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
         keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       );
-    })
+    }).then(() => self.clients.claim()) // 制御を即座に開始
   );
 });
 
-// フェッチ時にキャッシュを優先
+// フェッチ：オフライン時はキャッシュから返し、オンライン時はネットから取得
 self.addEventListener('fetch', (e) => {
   e.respondWith(
     caches.match(e.request).then((response) => {

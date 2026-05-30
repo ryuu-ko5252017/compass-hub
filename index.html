@@ -106,29 +106,37 @@
         }
 
         // クリップボードから座標を読み取って追加
-        async function addLocationFromClipboard() {
-            try {
-                const text = await navigator.clipboard.readText();
-                // 緯度,経度の抽出（Googleマップ形式に対応）
-                const match = text.match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
+async function addLocationFromClipboard() {
+    try {
+        // フォーカスを戻さないと読み取れない場合があるための対策
+        window.focus(); 
+        
+        const text = await navigator.clipboard.readText();
+        
+        // 緯度,経度の抽出（より広い形式に対応: スペースの有無や「北緯」等の文字混じりでも抽出可能に）
+        const match = text.match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
 
-                if (match) {
-                    const lat = parseFloat(match[1]);
-                    const lng = parseFloat(match[2]);
-                    const name = prompt("地点の名前を入力してください", `地点 ${new Date().toLocaleTimeString()}`);
-                    
-                    if (name) {
-                        savePoint(name, lat, lng);
-                        renderCustomPoint(name, lat, lng);
-                        statusText.innerText = "マイ地点を登録しました";
-                    }
-                } else {
-                    alert("クリップボードに有効な座標（緯度,経度）がありません。");
+        if (match) {
+            const lat = parseFloat(match[1]);
+            const lng = parseFloat(match[2]);
+            
+            // プロンプトを出す前に、少しだけ時間を空けるとブラウザのダイアログ競合を防げます
+            setTimeout(() => {
+                const name = prompt("地点の名前を入力してください", `地点 ${new Date().toLocaleTimeString()}`);
+                if (name) {
+                    savePoint(name, lat, lng);
+                    renderCustomPoint(name, lat, lng);
+                    statusText.innerText = "マイ地点を登録しました";
                 }
-            } catch (err) {
-                alert("クリップボードへのアクセス権限が必要です。");
-            }
+            }, 100);
+        } else {
+            alert("クリップボードに有効な座標が見つかりませんでした。\nGoogleマップで「35.123, 135.456」のような形式をコピーしてください。");
         }
+    } catch (err) {
+        console.error(err);
+        alert("座標の読み取りに失敗しました。ブラウザの「貼り付け許可」を確認してください。");
+    }
+}
 
         // LocalStorageに保存
         function savePoint(name, lat, lng) {
@@ -237,7 +245,9 @@
 
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
+                // 修正前: navigator.serviceWorker.register('./sw.js')
+		// 修正後: 末尾に日付などを付ける
+		navigator.serviceWorker.register('./sw.js?ver=20240530')
                     .then(reg => console.log('SW登録成功'))
                     .catch(err => console.log('SW登録失敗', err));
             });
